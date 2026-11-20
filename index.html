@@ -1,0 +1,2134 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>EPUB Studio — 離線電子書書庫與編輯閱讀器</title>
+<style>
+  :root {
+    --bg-app: #f4f5f7;
+    --bg-panel: #ffffff;
+    --bg-book: #fdfbf7;
+    --text-main: #1f2937;
+    --text-muted: #6b7280;
+    --border-color: #e5e7eb;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --danger: #ef4444;
+    --shadow-book: 0 20px 40px rgba(0,0,0,0.12), 0 0 1px rgba(0,0,0,0.2);
+    --font-reader: "PingFang HK", "Microsoft JhengHei", "Noto Serif TC", Georgia, serif;
+    --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang HK", sans-serif;
+    --reader-font-size: 18px;
+  }
+
+  [data-theme="sepia"] {
+    --bg-app: #e8dec8;
+    --bg-panel: #f4ecd8;
+    --bg-book: #fbf5e6;
+    --text-main: #433422;
+    --text-muted: #7c6a53;
+    --border-color: #dcd0b8;
+  }
+
+  [data-theme="dark"] {
+    --bg-app: #111827;
+    --bg-panel: #1f2937;
+    --bg-book: #18181b;
+    --text-main: #e5e7eb;
+    --text-muted: #9ca3af;
+    --border-color: #374151;
+    --shadow-book: 0 20px 40px rgba(0,0,0,0.6);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-ui);
+    background: var(--bg-app);
+    color: var(--text-main);
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: background 0.3s, color 0.3s;
+  }
+
+  /* 頂部導航欄 */
+  header {
+    height: 56px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    z-index: 30;
+    flex-shrink: 0;
+    gap: 8px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  .btn {
+    background: var(--bg-panel);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: rgba(128,128,128,0.1); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-danger { color: var(--danger); border-color: rgba(239,68,68,0.3); }
+  .btn-danger:hover { background: rgba(239,68,68,0.1); }
+  .btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn-sm { padding: 4px 8px; font-size: 12px; }
+
+  .mode-switch {
+    display: flex;
+    background: var(--bg-app);
+    padding: 3px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+  }
+  .mode-switch button {
+    border: none;
+    background: transparent;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .mode-switch button.active {
+    background: var(--bg-panel);
+    color: var(--accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  .header-actions { display: flex; gap: 6px; align-items: center; }
+
+  /* 書庫視圖 (Library View) */
+  #library-view {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    background: var(--bg-app);
+  }
+  .library-container {
+    max-width: 1120px;
+    margin: 0 auto;
+  }
+  .library-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .library-title h2 { font-size: 22px; margin-bottom: 4px; }
+  .library-title p { font-size: 13px; color: var(--text-muted); }
+  .library-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .book-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 20px;
+  }
+
+  .book-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+  }
+  .book-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+  }
+  .book-card.current-book {
+    border: 2px solid var(--accent);
+  }
+  .current-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 99px;
+    z-index: 2;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  }
+
+  .card-cover {
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    background: linear-gradient(135deg, #3b82f6 0%, #1e3a8a 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    text-align: center;
+    color: #fff;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+  .card-cover img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .card-cover-fallback-title {
+    font-family: var(--font-reader);
+    font-weight: 700;
+    font-size: 16px;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-body {
+    padding: 12px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .card-title {
+    font-weight: 700;
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .card-footer {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+  }
+
+  /* 主體佈局 (閱讀與編輯器) */
+  .workspace {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
+
+  aside {
+    width: 290px;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    z-index: 20;
+    transition: transform 0.3s ease;
+  }
+
+  .book-meta {
+    padding: 14px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .meta-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .meta-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+  }
+
+  .book-meta input[type="text"] {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--bg-app);
+    color: var(--text-main);
+    font-size: 13px;
+  }
+  .book-meta input[type="text"]:disabled {
+    border-color: transparent;
+    background: transparent;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  #book-title-input:disabled {
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  .cover-box {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .cover-thumb {
+    width: 54px;
+    height: 76px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-app);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .cover-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .cover-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1;
+  }
+  .cover-actions-row {
+    display: flex;
+    gap: 5px;
+  }
+
+  .chapter-header {
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .chapter-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+    list-style: none;
+  }
+
+  .chapter-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    margin-bottom: 4px;
+    gap: 6px;
+  }
+  .chapter-item:hover { background: rgba(128,128,128,0.08); }
+  .chapter-item.active { background: rgba(37,99,235,0.12); color: var(--accent); font-weight: 600; }
+  .chapter-item.cover-item { border-bottom: 1px dashed var(--border-color); border-radius: 6px 6px 0 0; margin-bottom: 8px; padding-bottom: 12px; }
+  .chapter-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .chapter-controls { display: none; gap: 4px; }
+  .editor-active .chapter-item:not(.cover-item):hover .chapter-controls,
+  .editor-active .chapter-item:not(.cover-item).active .chapter-controls { display: flex; }
+  .icon-btn {
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    padding: 2px 4px; border-radius: 4px; font-size: 12px;
+  }
+  .icon-btn:hover { background: rgba(128,128,128,0.2); color: var(--text-main); }
+
+  /* 閱讀器區域 (仿真揭頁) */
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    padding: 16px;
+  }
+
+  #reader-view {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .book-stage {
+    width: 100%;
+    max-width: 960px;
+    flex: 1;
+    min-height: 0;
+    background: var(--bg-book);
+    border-radius: 8px;
+    box-shadow: var(--shadow-book);
+    position: relative;
+    overflow: hidden;
+    perspective: 1800px;
+    border: 1px solid var(--border-color);
+    transition: max-width 0.25s ease, border-radius 0.25s ease;
+  }
+
+  @media (min-width: 769px) {
+    .book-stage::after {
+      content: "";
+      position: absolute;
+      top: 0; bottom: 0; left: 50%;
+      width: 30px;
+      transform: translateX(-50%);
+      background: linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.06) 50%, rgba(0,0,0,0) 100%);
+      pointer-events: none;
+      z-index: 5;
+    }
+  }
+
+  .page-viewport {
+    width: 100%;
+    height: 100%;
+    padding: 32px 40px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .page-columns {
+    height: 100%;
+    font-family: var(--font-reader);
+    font-size: var(--reader-font-size);
+    line-height: 1.8;
+    column-gap: 64px;
+    column-fill: auto;
+    transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
+
+  .page-columns h1, .page-columns h2, .page-columns h3 {
+    margin-bottom: 0.8em;
+    line-height: 1.3;
+    break-after: avoid;
+  }
+  .page-columns p { margin-bottom: 1em; text-align: justify; }
+  .page-columns img {
+    max-width: 100%;
+    max-height: 65vh;
+    display: block;
+    margin: 12px auto;
+    border-radius: 4px;
+    break-inside: avoid;
+  }
+
+  .reader-cover-page {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 16px;
+    break-inside: avoid;
+  }
+  .reader-cover-page img {
+    max-height: 68vh;
+    max-width: 85%;
+    width: auto;
+    object-fit: contain;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.18);
+    border-radius: 6px;
+    margin: 0;
+  }
+  .reader-cover-title {
+    font-size: 1.45em;
+    font-weight: 700;
+    margin-bottom: 0.2em !important;
+  }
+  .reader-cover-author {
+    font-size: 0.95em;
+    color: var(--text-muted);
+  }
+
+  /* 全螢幕閱讀模式樣式 */
+  .fullscreen-exit-fab {
+    display: none;
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 60;
+    background: var(--bg-panel);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+    opacity: 0.85;
+  }
+  .fullscreen-exit-fab:hover { opacity: 1; }
+
+  body.reader-fullscreen header,
+  body.reader-fullscreen aside,
+  body.reader-fullscreen .sidebar-backdrop {
+    display: none !important;
+  }
+  body.reader-fullscreen main {
+    padding: 12px 18px 8px;
+    background: var(--bg-app);
+  }
+  body.reader-fullscreen #reader-view {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-app);
+  }
+  body.reader-fullscreen .book-stage {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 6px;
+  }
+  body.reader-fullscreen .reader-footer {
+    max-width: 100%;
+  }
+  body.reader-fullscreen .fullscreen-exit-fab {
+    display: inline-flex;
+  }
+
+  /* 3D 揭頁動畫層 */
+  .flip-overlay {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 50%;
+    background: var(--bg-book);
+    box-shadow: -10px 0 30px rgba(0,0,0,0.15);
+    pointer-events: none;
+    z-index: 10;
+    opacity: 0;
+    transform-style: preserve-3d;
+  }
+  .flip-overlay.flip-next {
+    right: 0;
+    transform-origin: left center;
+    animation: flipNextAnim 0.48s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+  .flip-overlay.flip-prev {
+    left: 0;
+    transform-origin: right center;
+    animation: flipPrevAnim 0.48s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+
+  @keyframes flipNextAnim {
+    0% { opacity: 0.95; transform: rotateY(0deg); box-shadow: -5px 0 15px rgba(0,0,0,0.1); }
+    50% { opacity: 1; box-shadow: -25px 0 40px rgba(0,0,0,0.25); }
+    100% { opacity: 0; transform: rotateY(-180deg); }
+  }
+  @keyframes flipPrevAnim {
+    0% { opacity: 0.95; transform: rotateY(0deg); box-shadow: 5px 0 15px rgba(0,0,0,0.1); }
+    50% { opacity: 1; box-shadow: 25px 0 40px rgba(0,0,0,0.25); }
+    100% { opacity: 0; transform: rotateY(180deg); }
+  }
+
+  .tap-zone {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 18%;
+    z-index: 6;
+    cursor: pointer;
+  }
+  .tap-left { left: 0; }
+  .tap-right { right: 0; }
+
+  /* 可隱藏閱讀進度條區域 */
+  .reader-progress-bar-wrap {
+    width: 100%;
+    max-width: 960px;
+    padding: 8px 6px 2px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: opacity 0.2s ease, max-height 0.2s ease;
+    flex-shrink: 0;
+  }
+  body.reader-fullscreen .reader-progress-bar-wrap {
+    max-width: 100%;
+  }
+  .reader-progress-bar-wrap.hidden {
+    display: none;
+  }
+
+  .progress-track-container {
+    flex: 1;
+    position: relative;
+    height: 18px;
+    display: flex;
+    align-items: center;
+  }
+  .progress-track {
+    width: 100%;
+    height: 5px;
+    background: var(--border-color);
+    border-radius: 99px;
+    overflow: hidden;
+    position: relative;
+    pointer-events: none;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 99px;
+    transition: width 0.25s ease;
+  }
+  .progress-slider {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .progress-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .reader-footer {
+    width: 100%;
+    max-width: 960px;
+    height: 36px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 4px 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .reader-controls { display: flex; gap: 6px; align-items: center; }
+
+  /* 編輯器區域 */
+  #editor-view {
+    display: none;
+    width: 100%;
+    max-width: 900px;
+    height: 100%;
+    background: var(--bg-panel);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+  }
+
+  .editor-toolbar {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    background: var(--bg-app);
+  }
+
+  .editor-title-bar {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .editor-title-bar input {
+    width: 100%;
+    font-size: 20px;
+    font-weight: 700;
+    border: none;
+    background: transparent;
+    color: var(--text-main);
+    outline: none;
+  }
+
+  .editor-content {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+    font-family: var(--font-reader);
+    font-size: 17px;
+    line-height: 1.75;
+    outline: none;
+  }
+  .editor-content img {
+    max-width: 90%;
+    border-radius: 6px;
+    margin: 12px 0;
+    border: 2px solid transparent;
+  }
+  .editor-content img:hover { border-color: var(--accent); }
+
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: #1f2937;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    z-index: 100;
+    transition: transform 0.3s ease;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  .mobile-menu-btn { display: none; }
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 15;
+  }
+
+  @media (max-width: 768px) {
+    .mobile-menu-btn { display: inline-flex; }
+    .brand span { display: none; }
+    aside {
+      position: fixed;
+      top: 56px; bottom: 0; left: 0;
+      transform: translateX(-100%);
+    }
+    aside.open { transform: translateX(0); }
+    .sidebar-backdrop.open { display: block; }
+    main { padding: 8px; }
+    body.reader-fullscreen main { padding: 6px; }
+    .page-viewport { padding: 20px 18px; }
+    .flip-overlay { width: 100%; }
+    .header-actions .btn-text { display: none; }
+    #library-view { padding: 14px; }
+    .book-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <button class="btn mobile-menu-btn" id="btn-mobile-sidebar" onclick="toggleSidebar()">☰</button>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+    </svg>
+    <span>EPUB Studio</span>
+  </div>
+
+  <div class="mode-switch">
+    <button id="btn-mode-library" onclick="switchMode('library')">📚 書庫</button>
+    <button id="btn-mode-read" class="active" onclick="switchMode('read')">📖 閱讀</button>
+    <button id="btn-mode-edit" onclick="switchMode('edit')">✏️ 編輯</button>
+  </div>
+
+  <div class="header-actions">
+    <input type="file" id="epub-upload" accept=".epub" multiple style="display:none" onchange="handleEpubUpload(event)">
+    <button class="btn" onclick="document.getElementById('epub-upload').click()" title="匯入本機 EPUB 到書庫">
+      📂 <span class="btn-text">匯入 EPUB</span>
+    </button>
+    <button class="btn btn-primary" onclick="exportEpub()" title="匯出目前書籍為 EPUB 檔案">
+      💾 <span class="btn-text">匯出 EPUB</span>
+    </button>
+  </div>
+</header>
+
+<!-- 離線本機書庫視圖 -->
+<div id="library-view">
+  <div class="library-container">
+    <div class="library-header">
+      <div class="library-title">
+        <h2>📚 我的離線本機書庫</h2>
+        <p id="library-stats">所有書籍與圖片均儲存於瀏覽器本機 IndexedDB，斷網隨時開啟。</p>
+      </div>
+      <div class="library-actions">
+        <button class="btn" onclick="document.getElementById('epub-upload').click()">📂 匯入 EPUB 書籍</button>
+        <button class="btn btn-primary" onclick="createNewBook()">➕ 新建電子書</button>
+      </div>
+    </div>
+    <div class="book-grid" id="book-grid"></div>
+  </div>
+</div>
+
+<!-- 閱讀與編輯工作區 -->
+<div class="workspace" id="workspace">
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleSidebar()"></div>
+  <aside id="sidebar">
+    <div class="book-meta">
+      <div class="meta-field">
+        <span class="meta-label">書名</span>
+        <input type="text" id="book-title-input" value="" placeholder="輸入書名..." disabled oninput="updateBookMeta()">
+      </div>
+      <div class="meta-field">
+        <span class="meta-label">作者</span>
+        <input type="text" id="book-author-input" value="" placeholder="輸入作者..." disabled oninput="updateBookMeta()">
+      </div>
+      <div class="meta-field">
+        <span class="meta-label">封面圖片</span>
+        <div class="cover-box">
+          <div class="cover-thumb" id="cover-thumb">無封面</div>
+          <div class="cover-actions" id="cover-edit-controls" style="display:none;">
+            <input type="file" id="cover-upload" accept="image/*" style="display:none" onchange="handleCoverUpload(event)">
+            <button class="btn btn-sm" onclick="document.getElementById('cover-upload').click()">🖼️ 選擇封面</button>
+            <div class="cover-actions-row">
+              <button class="btn btn-sm btn-danger" style="flex:1; justify-content:center;" onclick="removeCover()">移除</button>
+            </div>
+          </div>
+          <div class="cover-actions" id="cover-read-hint">
+            <span style="font-size:11px; color:var(--text-muted);" id="cover-status-text">尚未設定封面</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chapter-header">
+      <span>章節目錄</span>
+      <button class="btn btn-primary" id="btn-add-chapter" style="display:none; padding:2px 8px; font-size:12px;" onclick="addChapter()">+ 新增</button>
+    </div>
+    <ul class="chapter-list" id="chapter-list"></ul>
+  </aside>
+
+  <main>
+    <!-- 閱讀模式 -->
+    <div id="reader-view">
+      <button class="btn btn-sm fullscreen-exit-fab" id="btn-exit-fullscreen" onclick="exitFullscreenReader()" title="退出全螢幕 (ESC)">
+        ✕ 退出全螢幕
+      </button>
+
+      <div class="book-stage" id="book-stage">
+        <div class="tap-zone tap-left" onclick="prevPage()" title="上一頁"></div>
+        <div class="tap-zone tap-right" onclick="nextPage()" title="下一頁"></div>
+        <div class="flip-overlay" id="flip-overlay"></div>
+        <div class="page-viewport" id="page-viewport">
+          <div class="page-columns" id="page-columns"></div>
+        </div>
+      </div>
+
+      <!-- 可隱藏閱讀進度條 -->
+      <div class="reader-progress-bar-wrap" id="reader-progress-wrap">
+        <div class="progress-track-container" title="拖曳進度條快速跳頁">
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <input type="range" class="progress-slider" id="progress-slider" min="1" max="1" value="1" oninput="handleProgressScrub(this.value)">
+        </div>
+        <span class="progress-label" id="page-indicator">第 1/1 章 · 1/1 頁 (100%)</span>
+      </div>
+
+      <div class="reader-footer">
+        <div class="reader-controls">
+          <button class="btn" style="padding:2px 8px;" onclick="changeFontSize(-2)">A-</button>
+          <button class="btn" style="padding:2px 8px;" onclick="changeFontSize(2)">A+</button>
+          <button class="btn" style="padding:2px 8px;" onclick="setTheme('light')">☀️</button>
+          <button class="btn" style="padding:2px 8px;" onclick="setTheme('sepia')">📜</button>
+          <button class="btn" style="padding:2px 8px;" onclick="setTheme('dark')">🌙</button>
+          <button class="btn" style="padding:2px 8px;" id="btn-toggle-fullscreen" onclick="toggleFullscreenReader()" title="全螢幕閱讀">⛶ 全螢幕</button>
+        </div>
+        <div class="reader-controls">
+          <button class="btn" style="padding:2px 8px;" id="btn-toggle-progress" onclick="toggleProgressBar()" title="顯示／隱藏閱讀進度條">📊 隱藏進度</button>
+          <button class="btn" style="padding:2px 10px;" onclick="prevPage()">◀</button>
+          <button class="btn" style="padding:2px 10px;" onclick="nextPage()">▶</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 編輯模式 -->
+    <div id="editor-view">
+      <div class="editor-toolbar">
+        <button class="btn" onclick="execCmd('bold')"><b>B</b></button>
+        <button class="btn" onclick="execCmd('italic')"><i>I</i></button>
+        <button class="btn" onclick="execCmd('formatBlock', 'H2')">H2 標題</button>
+        <button class="btn" onclick="execCmd('formatBlock', 'P')">內文</button>
+        <button class="btn" onclick="execCmd('insertUnorderedList')">• 列表</button>
+        <input type="file" id="img-upload" accept="image/*" style="display:none" onchange="insertLocalImage(event)">
+        <button class="btn btn-primary" onclick="document.getElementById('img-upload').click()">🖼️ 插入本機圖片</button>
+      </div>
+      <div class="editor-title-bar">
+        <input type="text" id="edit-chapter-title" placeholder="輸入章節標題..." oninput="saveCurrentChapter()">
+      </div>
+      <div class="editor-content" id="editor-content" contenteditable="true" oninput="saveCurrentChapter()"></div>
+    </div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/**
+ * 1. IndexedDB 離線本機書庫引擎
+ */
+const DB_NAME = 'EpubStudioOfflineDB';
+const DB_VERSION = 1;
+const STORE_BOOKS = 'books';
+
+let dbInstance = null;
+
+function openLibraryDB() {
+  return new Promise((resolve, reject) => {
+    if (dbInstance) return resolve(dbInstance);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_BOOKS)) {
+        db.createObjectStore(STORE_BOOKS, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = (e) => {
+      dbInstance = e.target.result;
+      resolve(dbInstance);
+    };
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+
+async function dbGetAllBooks() {
+  const db = await openLibraryDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_BOOKS, 'readonly');
+    const req = tx.objectStore(STORE_BOOKS).getAll();
+    req.onsuccess = () => {
+      const list = req.result || [];
+      list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      resolve(list);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGetBook(id) {
+  const db = await openLibraryDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_BOOKS, 'readonly');
+    const req = tx.objectStore(STORE_BOOKS).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbSaveBook(book) {
+  book.updatedAt = Date.now();
+  const db = await openLibraryDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_BOOKS, 'readwrite');
+    tx.objectStore(STORE_BOOKS).put(book);
+    tx.oncomplete = () => resolve(book);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function dbDeleteBook(id) {
+  const db = await openLibraryDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_BOOKS, 'readwrite');
+    tx.objectStore(STORE_BOOKS).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function createDefaultGuideBook() {
+  return {
+    id: 'book-default-guide',
+    title: "EPUB Studio 使用指南",
+    author: "離線創作工具",
+    cover: null,
+    updatedAt: Date.now(),
+    chapters: [
+      {
+        id: "chap-1",
+        title: "第一章：歡迎使用離線本機書庫",
+        content: `<h2>歡迎來到 EPUB Studio</h2>
+        <p>這是一個完全獨立運作、無需任何網路連線的單一檔案電子書書庫、閱讀器與編輯器。</p>
+        <p>點擊頂部的「<b>📚 書庫</b>」，你可以管理多本電子書、新建空白書籍，或一次過匯入多個本機 <code>.epub</code> 檔案永久保存於瀏覽器內。</p>
+        <p>在閱讀模式下，點擊畫面左右兩側、按鍵盤方向鍵，或在手機螢幕上左右滑動即可體驗仿真揭頁效果；底部的閱讀進度條支援拖曳跳頁，亦可隨時一鍵隱藏。</p>`
+      },
+      {
+        id: "chap-2",
+        title: "第二章：零外部依賴架構",
+        content: `<h2>斷網依然流暢運作</h2>
+        <p>本工具內建純原生 JavaScript 撰寫的 ZIP 壓縮／解壓縮引擎與 IndexedDB 離線書庫，不依賴任何第三方 CDN，隨時隨地創作與閱讀標準 EPUB 3.0 電子書。</p>`
+      }
+    ]
+  };
+}
+
+/**
+ * 2. 應用程式核心狀態與初始化
+ */
+let bookData = null;
+let currentMode = 'read';
+let currentChapterIdx = 0; // -1 代表封面頁
+let currentPage = 0;
+let totalPages = 1;
+let fontSize = 18;
+let pageStepWidth = 0;
+let isPseudoFullscreen = false;
+let isProgressVisible = true;
+
+window.addEventListener('DOMContentLoaded', async () => {
+  await openLibraryDB();
+  let allBooks = await dbGetAllBooks();
+
+  const legacyRaw = localStorage.getItem('epub_studio_data');
+  if (legacyRaw && allBooks.length === 0) {
+    try {
+      const parsed = JSON.parse(legacyRaw);
+      const migrated = {
+        id: 'book-' + Date.now(),
+        title: parsed.title || '未命名電子書',
+        author: parsed.author || '離線作者',
+        cover: parsed.cover || null,
+        chapters: parsed.chapters || createDefaultGuideBook().chapters,
+        updatedAt: Date.now()
+      };
+      await dbSaveBook(migrated);
+      localStorage.removeItem('epub_studio_data');
+      allBooks = [migrated];
+    } catch (e) {}
+  }
+
+  if (allBooks.length === 0) {
+    const starter = createDefaultGuideBook();
+    await dbSaveBook(starter);
+    allBooks = [starter];
+  }
+
+  const savedProgVis = localStorage.getItem('epub_studio_progress_visible');
+  if (savedProgVis === 'false') {
+    applyProgressVisibility(false, false);
+  }
+
+  const lastActiveId = localStorage.getItem('epub_studio_active_id');
+  const activeBook = allBooks.find(b => b.id === lastActiveId) || allBooks[0];
+
+  openBookFromLibrary(activeBook, 'read');
+  setupTouchGestures();
+  setupFullscreenListeners();
+  window.addEventListener('resize', debounce(recalculatePagination, 200));
+  window.addEventListener('keydown', handleKeydown);
+});
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('open');
+}
+
+/**
+ * 可隱藏進度條控制
+ */
+function toggleProgressBar() {
+  applyProgressVisibility(!isProgressVisible, true);
+}
+
+function applyProgressVisibility(visible, recalc = true) {
+  isProgressVisible = visible;
+  localStorage.setItem('epub_studio_progress_visible', String(visible));
+  const wrap = document.getElementById('reader-progress-wrap');
+  const btn = document.getElementById('btn-toggle-progress');
+  if (wrap) wrap.classList.toggle('hidden', !visible);
+  if (btn) btn.textContent = visible ? '📊 隱藏進度' : '📊 顯示進度';
+  if (recalc) setTimeout(recalculatePagination, 30);
+}
+
+function handleProgressScrub(val) {
+  const targetPage = Math.max(0, Math.min(totalPages - 1, parseInt(val, 10) - 1));
+  if (targetPage !== currentPage) {
+    currentPage = targetPage;
+    applyPageTransform(false);
+  }
+}
+
+/**
+ * 全螢幕閱讀模式控制（原生 Fullscreen API + 沉浸版面後備）
+ */
+function isAnyFullscreen() {
+  return Boolean(document.fullscreenElement || document.webkitFullscreenElement || isPseudoFullscreen);
+}
+
+function syncFullscreenUI(active) {
+  document.body.classList.toggle('reader-fullscreen', active);
+  const btn = document.getElementById('btn-toggle-fullscreen');
+  if (btn) {
+    btn.classList.toggle('active', active);
+    btn.textContent = active ? '⛶ 離開全螢幕' : '⛶ 全螢幕';
+  }
+  setTimeout(recalculatePagination, 60);
+}
+
+async function toggleFullscreenReader() {
+  if (currentMode !== 'read') return;
+  if (isAnyFullscreen()) {
+    await exitFullscreenReader();
+  } else {
+    await enterFullscreenReader();
+  }
+}
+
+async function enterFullscreenReader() {
+  const target = document.getElementById('reader-view');
+  isPseudoFullscreen = true;
+  syncFullscreenUI(true);
+
+  try {
+    if (target.requestFullscreen) {
+      await target.requestFullscreen();
+    } else if (target.webkitRequestFullscreen) {
+      target.webkitRequestFullscreen();
+    }
+  } catch (err) {}
+}
+
+async function exitFullscreenReader() {
+  isPseudoFullscreen = false;
+  try {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      await document.exitFullscreen();
+    } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+      document.webkitExitFullscreen();
+    }
+  } catch (err) {}
+  syncFullscreenUI(false);
+}
+
+function setupFullscreenListeners() {
+  const onFsChange = () => {
+    const nativeActive = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!nativeActive) {
+      isPseudoFullscreen = false;
+    }
+    syncFullscreenUI(isAnyFullscreen());
+  };
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+}
+
+async function switchMode(mode) {
+  if (mode !== 'read' && isAnyFullscreen()) {
+    await exitFullscreenReader();
+  }
+
+  currentMode = mode;
+  const isLib = mode === 'library';
+  const isEdit = mode === 'edit';
+
+  document.getElementById('btn-mode-library').classList.toggle('active', isLib);
+  document.getElementById('btn-mode-read').classList.toggle('active', mode === 'read');
+  document.getElementById('btn-mode-edit').classList.toggle('active', isEdit);
+
+  document.getElementById('library-view').style.display = isLib ? 'block' : 'none';
+  document.getElementById('workspace').style.display = isLib ? 'none' : 'flex';
+  document.getElementById('btn-mobile-sidebar').style.display = isLib ? 'none' : '';
+
+  if (isLib) {
+    await renderLibraryView();
+    return;
+  }
+
+  document.getElementById('reader-view').style.display = isEdit ? 'none' : 'flex';
+  document.getElementById('editor-view').style.display = isEdit ? 'flex' : 'none';
+  document.getElementById('btn-add-chapter').style.display = isEdit ? 'inline-flex' : 'none';
+  document.getElementById('workspace').classList.toggle('editor-active', isEdit);
+
+  document.getElementById('book-title-input').disabled = !isEdit;
+  document.getElementById('book-author-input').disabled = !isEdit;
+  document.getElementById('cover-edit-controls').style.display = isEdit ? 'flex' : 'none';
+  document.getElementById('cover-read-hint').style.display = isEdit ? 'none' : 'flex';
+
+  if (isEdit && currentChapterIdx < 0) {
+    currentChapterIdx = 0;
+    loadChapter(0);
+  } else if (!isEdit) {
+    loadChapter(currentChapterIdx);
+  }
+}
+
+/**
+ * 3. 書庫管理功能
+ */
+async function renderLibraryView() {
+  const books = await dbGetAllBooks();
+  const grid = document.getElementById('book-grid');
+  const stats = document.getElementById('library-stats');
+  stats.textContent = `本機書庫共有 ${books.length} 本電子書（離線儲存於瀏覽器 IndexedDB）`;
+  grid.innerHTML = '';
+
+  books.forEach(b => {
+    const isCurrent = bookData && b.id === bookData.id;
+    const card = document.createElement('div');
+    card.className = 'book-card' + (isCurrent ? ' current-book' : '');
+
+    const dateStr = b.updatedAt
+      ? new Date(b.updatedAt).toLocaleDateString('zh-HK', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : '';
+
+    const coverHtml = b.cover
+      ? `<img src="${b.cover}" alt="${escapeHtml(b.title)}">`
+      : `<div class="card-cover-fallback-title">${escapeHtml(b.title || '未命名電子書')}</div>`;
+
+    card.innerHTML = `
+      ${isCurrent ? '<span class="current-badge">目前開啟</span>' : ''}
+      <div class="card-cover" onclick="selectBookById('${b.id}', 'read')">
+        ${coverHtml}
+      </div>
+      <div class="card-body">
+        <div class="card-title" title="${escapeHtml(b.title)}">${escapeHtml(b.title || '未命名電子書')}</div>
+        <div class="card-meta">${escapeHtml(b.author || '未知作者')} · ${b.chapters?.length || 0} 章</div>
+        <div class="card-meta" style="font-size:11px;">更新：${dateStr}</div>
+      </div>
+      <div class="card-footer">
+        <button class="btn btn-sm btn-primary" style="flex:1; justify-content:center;" onclick="selectBookById('${b.id}', 'read')">📖 閱讀</button>
+        <button class="btn btn-sm" onclick="selectBookById('${b.id}', 'edit')" title="編輯書籍">✏️</button>
+        <button class="btn btn-sm" onclick="duplicateBookById('${b.id}')" title="複製書籍">📋</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteBookById('${b.id}')" title="刪除書籍">🗑️</button>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+async function selectBookById(id, targetMode = 'read') {
+  const book = await dbGetBook(id);
+  if (!book) return;
+  openBookFromLibrary(book, targetMode);
+}
+
+function openBookFromLibrary(book, targetMode = 'read') {
+  bookData = book;
+  localStorage.setItem('epub_studio_active_id', book.id);
+  currentChapterIdx = (targetMode === 'read' && bookData.cover) ? -1 : 0;
+  renderSidebar();
+  switchMode(targetMode);
+  loadChapter(currentChapterIdx);
+}
+
+async function createNewBook() {
+  const newBook = {
+    id: 'book-' + Date.now(),
+    title: '未命名新書',
+    author: '離線作者',
+    cover: null,
+    updatedAt: Date.now(),
+    chapters: [
+      {
+        id: 'chap-' + Date.now(),
+        title: '第一章：開始創作',
+        content: '<p>在此輸入你的故事或文章內容...</p>'
+      }
+    ]
+  };
+  await dbSaveBook(newBook);
+  openBookFromLibrary(newBook, 'edit');
+  showToast('已建立新電子書並進入編輯模式');
+}
+
+async function duplicateBookById(id) {
+  const orig = await dbGetBook(id);
+  if (!orig) return;
+  const copy = JSON.parse(JSON.stringify(orig));
+  copy.id = 'book-' + Date.now();
+  copy.title = (orig.title || '未命名') + ' (副本)';
+  await dbSaveBook(copy);
+  await renderLibraryView();
+  showToast('已複製書籍');
+}
+
+async function deleteBookById(id) {
+  const books = await dbGetAllBooks();
+  const target = books.find(b => b.id === id);
+  if (!target) return;
+  if (!confirm(`確定要從本機書庫永久刪除《${target.title}》嗎？`)) return;
+
+  await dbDeleteBook(id);
+  const remaining = await dbGetAllBooks();
+
+  if (remaining.length === 0) {
+    const starter = createDefaultGuideBook();
+    await dbSaveBook(starter);
+    remaining.push(starter);
+  }
+
+  if (bookData && bookData.id === id) {
+    bookData = remaining[0];
+    localStorage.setItem('epub_studio_active_id', bookData.id);
+    currentChapterIdx = bookData.cover ? -1 : 0;
+    renderSidebar();
+    loadChapter(currentChapterIdx);
+  }
+
+  await renderLibraryView();
+  showToast('已從書庫刪除書籍');
+}
+
+function persistCurrentBook() {
+  if (!bookData) return;
+  dbSaveBook(bookData).catch(e => console.error('儲存失敗:', e));
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+}
+
+function changeFontSize(delta) {
+  fontSize = Math.max(14, Math.min(28, fontSize + delta));
+  document.documentElement.style.setProperty('--reader-font-size', fontSize + 'px');
+  recalculatePagination();
+}
+
+/**
+ * 4. 書籍資訊、封面與章節管理
+ */
+function renderCoverPreview() {
+  const thumb = document.getElementById('cover-thumb');
+  const statusText = document.getElementById('cover-status-text');
+  if (bookData.cover) {
+    thumb.innerHTML = `<img src="${bookData.cover}" alt="封面">`;
+    statusText.textContent = '已設定封面（閱讀首頁顯示）';
+  } else {
+    thumb.innerHTML = '無封面';
+    statusText.textContent = '尚未設定封面';
+  }
+}
+
+function handleCoverUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    bookData.cover = e.target.result;
+    persistCurrentBook();
+    renderCoverPreview();
+    renderSidebar();
+    if (currentMode === 'read') {
+      loadChapter(-1);
+    }
+    showToast('封面圖片已更新並儲存至書庫');
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+function removeCover() {
+  if (!bookData.cover) return;
+  bookData.cover = null;
+  persistCurrentBook();
+  renderCoverPreview();
+  renderSidebar();
+  if (currentChapterIdx < 0) {
+    loadChapter(0);
+  } else if (currentMode === 'read') {
+    loadChapter(currentChapterIdx);
+  }
+  showToast('已移除封面圖片');
+}
+
+function renderSidebar() {
+  if (!bookData) return;
+  document.getElementById('book-title-input').value = bookData.title;
+  document.getElementById('book-author-input').value = bookData.author;
+  renderCoverPreview();
+
+  const list = document.getElementById('chapter-list');
+  list.innerHTML = '';
+
+  if (bookData.cover) {
+    const coverLi = document.createElement('li');
+    coverLi.className = 'chapter-item cover-item' + (currentChapterIdx === -1 ? ' active' : '');
+    coverLi.onclick = () => {
+      loadChapter(-1);
+      if (window.innerWidth <= 768) toggleSidebar();
+    };
+    coverLi.innerHTML = `<span class="chapter-title-text">🖼️ 封面頁</span>`;
+    list.appendChild(coverLi);
+  }
+
+  bookData.chapters.forEach((chap, idx) => {
+    const li = document.createElement('li');
+    li.className = 'chapter-item' + (idx === currentChapterIdx ? ' active' : '');
+    li.onclick = (e) => {
+      if (e.target.closest('.chapter-controls')) return;
+      loadChapter(idx);
+      if (window.innerWidth <= 768) toggleSidebar();
+    };
+
+    li.innerHTML = `
+      <span class="chapter-title-text">${escapeHtml(chap.title || '無標題章節')}</span>
+      <div class="chapter-controls">
+        <button class="icon-btn" title="上移" onclick="moveChapter(${idx}, -1)">↑</button>
+        <button class="icon-btn" title="下移" onclick="moveChapter(${idx}, 1)">↓</button>
+        <button class="icon-btn" style="color:var(--danger)" title="刪除" onclick="deleteChapter(${idx})">✕</button>
+      </div>
+    `;
+    list.appendChild(li);
+  });
+}
+
+function loadChapter(idx) {
+  if (!bookData) return;
+  if (idx === -1 && !bookData.cover) idx = 0;
+  if (idx < -1 || idx >= bookData.chapters.length) return;
+  currentChapterIdx = idx;
+  renderSidebar();
+
+  const cols = document.getElementById('page-columns');
+  currentPage = 0;
+
+  if (idx === -1) {
+    cols.innerHTML = `
+      <div class="reader-cover-page">
+        <img src="${bookData.cover}" alt="${escapeHtml(bookData.title)}">
+        <div class="reader-cover-title">${escapeHtml(bookData.title || '未命名電子書')}</div>
+        <div class="reader-cover-author">${escapeHtml(bookData.author || '')}</div>
+      </div>`;
+    setTimeout(recalculatePagination, 30);
+    return;
+  }
+
+  const chap = bookData.chapters[idx];
+  document.getElementById('edit-chapter-title').value = chap.title;
+  document.getElementById('editor-content').innerHTML = chap.content;
+
+  cols.innerHTML = `<h1>${escapeHtml(chap.title)}</h1>` + chap.content;
+
+  const imgs = cols.querySelectorAll('img');
+  if (imgs.length > 0) {
+    let loaded = 0;
+    imgs.forEach(img => {
+      if (img.complete) loaded++;
+      else img.onload = img.onerror = () => { loaded++; if (loaded >= imgs.length) recalculatePagination(); };
+    });
+  }
+  setTimeout(recalculatePagination, 30);
+}
+
+function updateBookMeta() {
+  bookData.title = document.getElementById('book-title-input').value;
+  bookData.author = document.getElementById('book-author-input').value;
+  persistCurrentBook();
+  if (currentChapterIdx === -1 && currentMode === 'read') {
+    loadChapter(-1);
+  }
+}
+
+function saveCurrentChapter() {
+  if (currentChapterIdx < 0) return;
+  const chap = bookData.chapters[currentChapterIdx];
+  if (!chap) return;
+  chap.title = document.getElementById('edit-chapter-title').value;
+  chap.content = document.getElementById('editor-content').innerHTML;
+  renderSidebar();
+  persistCurrentBook();
+}
+
+function addChapter() {
+  const newIdx = bookData.chapters.length + 1;
+  bookData.chapters.push({
+    id: 'chap-' + Date.now(),
+    title: `第 ${newIdx} 章：新章節`,
+    content: '<p>在此輸入章節內容...</p>'
+  });
+  persistCurrentBook();
+  loadChapter(bookData.chapters.length - 1);
+  showToast('已新增章節');
+}
+
+function deleteChapter(idx) {
+  if (bookData.chapters.length <= 1) {
+    showToast('至少需要保留一個章節');
+    return;
+  }
+  if (!confirm(`確定要刪除「${bookData.chapters[idx].title}」嗎？`)) return;
+  bookData.chapters.splice(idx, 1);
+  if (currentChapterIdx >= bookData.chapters.length) {
+    currentChapterIdx = bookData.chapters.length - 1;
+  }
+  persistCurrentBook();
+  loadChapter(currentChapterIdx);
+  showToast('章節已刪除');
+}
+
+function moveChapter(idx, dir) {
+  const target = idx + dir;
+  if (target < 0 || target >= bookData.chapters.length) return;
+  const temp = bookData.chapters[idx];
+  bookData.chapters[idx] = bookData.chapters[target];
+  bookData.chapters[target] = temp;
+  if (currentChapterIdx === idx) currentChapterIdx = target;
+  else if (currentChapterIdx === target) currentChapterIdx = idx;
+  persistCurrentBook();
+  renderSidebar();
+}
+
+function execCmd(cmd, val = null) {
+  document.execCommand(cmd, false, val);
+  saveCurrentChapter();
+}
+
+function insertLocalImage(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const editor = document.getElementById('editor-content');
+    editor.focus();
+    const imgHtml = `<img src="${e.target.result}" alt="${escapeHtml(file.name)}"><p><br></p>`;
+    document.execCommand('insertHTML', false, imgHtml);
+    saveCurrentChapter();
+    showToast('圖片已成功嵌入並存入書庫');
+  };
+  reader.readAsDataURL(file);
+  event.target.value = '';
+}
+
+/**
+ * 5. 仿真揭頁與進度條分頁引擎
+ */
+function recalculatePagination() {
+  if (currentMode !== 'read') return;
+  const viewport = document.getElementById('page-viewport');
+  const cols = document.getElementById('page-columns');
+  const isMobile = window.innerWidth <= 768;
+
+  const style = getComputedStyle(viewport);
+  const innerWidth = viewport.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const gap = isMobile ? 24 : 64;
+
+  cols.style.columnGap = gap + 'px';
+  if (isMobile) {
+    cols.style.columnWidth = innerWidth + 'px';
+    pageStepWidth = innerWidth + gap;
+  } else {
+    const singleColWidth = (innerWidth - gap) / 2;
+    cols.style.columnWidth = singleColWidth + 'px';
+    pageStepWidth = innerWidth + gap;
+  }
+
+  cols.style.transform = 'translateX(0px)';
+  const totalScrollWidth = cols.scrollWidth;
+  totalPages = Math.max(1, Math.round((totalScrollWidth + gap) / pageStepWidth));
+
+  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  applyPageTransform(false);
+}
+
+function applyPageTransform(animate, direction = 'next') {
+  const cols = document.getElementById('page-columns');
+  const overlay = document.getElementById('flip-overlay');
+
+  if (animate) {
+    overlay.className = 'flip-overlay';
+    void overlay.offsetWidth;
+    overlay.classList.add(direction === 'next' ? 'flip-next' : 'flip-prev');
+  }
+
+  const offset = currentPage * pageStepWidth;
+  cols.style.transform = `translateX(-${offset}px)`;
+
+  // 更新進度條數值與文字
+  const pct = totalPages > 1 ? Math.round(((currentPage + 1) / totalPages) * 100) : 100;
+  const fill = document.getElementById('progress-fill');
+  const slider = document.getElementById('progress-slider');
+  if (fill) fill.style.width = pct + '%';
+  if (slider) {
+    slider.max = totalPages;
+    slider.value = currentPage + 1;
+  }
+
+  const secLabel = currentChapterIdx === -1
+    ? '封面'
+    : `第 ${currentChapterIdx + 1}/${bookData.chapters.length} 章`;
+  document.getElementById('page-indicator').textContent =
+    `${secLabel} · ${currentPage + 1}/${totalPages} 頁 (${pct}%)`;
+}
+
+function nextPage() {
+  if (currentPage < totalPages - 1) {
+    currentPage++;
+    applyPageTransform(true, 'next');
+  } else if (currentChapterIdx < bookData.chapters.length - 1) {
+    loadChapter(currentChapterIdx + 1);
+    setTimeout(() => applyPageTransform(true, 'next'), 40);
+  } else {
+    showToast('已經是最後一頁');
+  }
+}
+
+function prevPage() {
+  if (currentPage > 0) {
+    currentPage--;
+    applyPageTransform(true, 'prev');
+  } else if (currentChapterIdx > (bookData.cover ? -1 : 0)) {
+    const prevIdx = currentChapterIdx - 1;
+    loadChapter(prevIdx);
+    setTimeout(() => {
+      currentPage = totalPages - 1;
+      applyPageTransform(true, 'prev');
+    }, 40);
+  } else {
+    showToast('已經是第一頁');
+  }
+}
+
+function handleKeydown(e) {
+  if (currentMode !== 'read') return;
+  if (e.key === 'ArrowRight' || e.key === 'PageDown') nextPage();
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') prevPage();
+  if (e.key === 'Escape' && isPseudoFullscreen) exitFullscreenReader();
+}
+
+function setupTouchGestures() {
+  const stage = document.getElementById('book-stage');
+  let startX = 0, startY = 0;
+  stage.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  stage.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx < 0) nextPage();
+      else prevPage();
+    }
+  }, { passive: true });
+}
+
+/**
+ * 6. 原生零依賴 ZIP 壓縮與解壓縮引擎 (支援 EPUB 3.0)
+ */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[i] = c;
+  }
+  return table;
+})();
+
+function crc32(uint8) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < uint8.length; i++) {
+    crc = CRC_TABLE[(crc ^ uint8[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function dataUrlToBytes(dataUrl) {
+  const match = dataUrl.match(/^data:(image\/([a-zA-Z0-9+]+));base64,(.+)$/);
+  if (!match) return null;
+  const mime = match[1];
+  const ext = match[2] === 'jpeg' ? 'jpg' : match[2];
+  const binStr = atob(match[3]);
+  const bytes = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+  return { mime, ext, bytes };
+}
+
+function buildZip(files) {
+  const encoder = new TextEncoder();
+  const localChunks = [];
+  const centralChunks = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name);
+    const data = file.data;
+    const crc = crc32(data);
+
+    const localHeader = new ArrayBuffer(30 + nameBytes.length);
+    const lv = new DataView(localHeader);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);
+    lv.setUint16(10, 0, true);
+    lv.setUint16(12, 0x0021, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    new Uint8Array(localHeader, 30).set(nameBytes);
+
+    localChunks.push(new Uint8Array(localHeader), data);
+
+    const centralHeader = new ArrayBuffer(46 + nameBytes.length);
+    const cv = new DataView(centralHeader);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0x0021, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    new Uint8Array(centralHeader, 46).set(nameBytes);
+
+    centralChunks.push(new Uint8Array(centralHeader));
+    offset += localHeader.byteLength + data.length;
+  }
+
+  const centralSize = centralChunks.reduce((acc, c) => acc + c.length, 0);
+  const eocd = new ArrayBuffer(22);
+  const ev = new DataView(eocd);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  const totalSize = offset + centralSize + 22;
+  const out = new Uint8Array(totalSize);
+  let pos = 0;
+  for (const c of localChunks) { out.set(c, pos); pos += c.length; }
+  for (const c of centralChunks) { out.set(c, pos); pos += c.length; }
+  out.set(new Uint8Array(eocd), pos);
+  return out;
+}
+
+async function readZip(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  const bytes = new Uint8Array(arrayBuffer);
+  const decoder = new TextDecoder('utf-8');
+  const fileMap = new Map();
+
+  let eocdOffset = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) throw new Error('無效的 EPUB/ZIP 檔案格式');
+
+  const totalEntries = view.getUint16(eocdOffset + 10, true);
+  let cdOffset = view.getUint32(eocdOffset + 16, true);
+
+  for (let i = 0; i < totalEntries; i++) {
+    if (view.getUint32(cdOffset, true) !== 0x02014b50) break;
+    const method = view.getUint16(cdOffset + 10, true);
+    const compSize = view.getUint32(cdOffset + 20, true);
+    const nameLen = view.getUint16(cdOffset + 28, true);
+    const extraLen = view.getUint16(cdOffset + 30, true);
+    const commentLen = view.getUint16(cdOffset + 32, true);
+    const localOffset = view.getUint32(cdOffset + 42, true);
+
+    const fileName = decoder.decode(bytes.subarray(cdOffset + 46, cdOffset + 46 + nameLen));
+    cdOffset += 46 + nameLen + extraLen + commentLen;
+
+    if (fileName.endsWith('/')) continue;
+
+    const lNameLen = view.getUint16(localOffset + 26, true);
+    const lExtraLen = view.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+    const compData = bytes.subarray(dataStart, dataStart + compSize);
+
+    if (method === 0) {
+      fileMap.set(fileName, compData);
+    } else if (method === 8) {
+      const ds = new DecompressionStream('deflate-raw');
+      const writer = ds.writable.getWriter();
+      writer.write(compData);
+      writer.close();
+      const resp = new Response(ds.readable);
+      const buf = await resp.arrayBuffer();
+      fileMap.set(fileName, new Uint8Array(buf));
+    }
+  }
+  return fileMap;
+}
+
+/**
+ * 7. EPUB 匯入（支援多檔批量匯入書庫）與匯出
+ */
+async function exportEpub() {
+  if (!bookData) return;
+  showToast('正在打包 EPUB 電子書...');
+  const enc = new TextEncoder();
+  const zipFiles = [];
+  const bookId = 'urn:uuid:' + crypto.randomUUID();
+
+  zipFiles.push({ name: 'mimetype', data: enc.encode('application/epub+zip') });
+
+  const containerXml = `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`;
+  zipFiles.push({ name: 'META-INF/container.xml', data: enc.encode(containerXml) });
+
+  const manifestItems = [];
+  const spineItems = [];
+  const navPoints = [];
+  let imgCounter = 1;
+  let coverMetaTag = '';
+
+  if (bookData.cover) {
+    const cov = dataUrlToBytes(bookData.cover);
+    if (cov) {
+      const coverHref = `images/cover.${cov.ext}`;
+      zipFiles.push({ name: `OEBPS/${coverHref}`, data: cov.bytes });
+      manifestItems.push(`<item id="cover-image" href="${coverHref}" media-type="${cov.mime}" properties="cover-image"/>`);
+      coverMetaTag = `<meta name="cover" content="cover-image"/>`;
+
+      const coverXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-HK">
+<head>
+  <title>封面</title>
+  <style>
+    body { margin: 0; padding: 0; text-align: center; }
+    img { max-width: 100%; max-height: 100vh; object-fit: contain; }
+  </style>
+</head>
+<body>
+  <img src="${coverHref}" alt="${escapeXml(bookData.title)}"/>
+</body>
+</html>`;
+      zipFiles.push({ name: 'OEBPS/cover.xhtml', data: enc.encode(coverXhtml) });
+      manifestItems.push(`<item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/>`);
+      spineItems.push(`<itemref idref="cover-page" linear="yes"/>`);
+    }
+  }
+
+  bookData.chapters.forEach((chap, index) => {
+    const chapFileName = `chapter_${index + 1}.xhtml`;
+    const chapId = `chap_${index + 1}`;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${chap.content}</div>`, 'text/html');
+    const imgs = doc.querySelectorAll('img');
+
+    imgs.forEach(img => {
+      const src = img.getAttribute('src') || '';
+      if (src.startsWith('data:image/')) {
+        const parsedImg = dataUrlToBytes(src);
+        if (parsedImg) {
+          const idxNum = imgCounter++;
+          const imgName = `images/img_${idxNum}.${parsedImg.ext}`;
+          zipFiles.push({ name: `OEBPS/${imgName}`, data: parsedImg.bytes });
+          manifestItems.push(`<item id="img_${idxNum}" href="${imgName}" media-type="${parsedImg.mime}"/>`);
+          img.setAttribute('src', imgName);
+        }
+      }
+    });
+
+    const serializer = new XMLSerializer();
+    let bodyInner = '';
+    doc.body.firstChild.childNodes.forEach(node => {
+      bodyInner += serializer.serializeToString(node);
+    });
+
+    const xhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-HK">
+<head>
+  <title>${escapeXml(chap.title)}</title>
+  <style>
+    body { font-family: serif; line-height: 1.8; padding: 5%; }
+    img { max-width: 100%; height: auto; display: block; margin: 1em auto; }
+    h1, h2 { line-height: 1.3; }
+  </style>
+</head>
+<body>
+  <h1>${escapeXml(chap.title)}</h1>
+  ${bodyInner}
+</body>
+</html>`;
+
+    zipFiles.push({ name: `OEBPS/${chapFileName}`, data: enc.encode(xhtml) });
+    manifestItems.push(`<item id="${chapId}" href="${chapFileName}" media-type="application/xhtml+xml"/>`);
+    spineItems.push(`<itemref idref="${chapId}"/>`);
+    navPoints.push(`<li><a href="${chapFileName}">${escapeXml(chap.title)}</a></li>`);
+  });
+
+  const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>目錄</title></head>
+<body>
+  <nav epub:type="toc" id="toc">
+    <h1>目錄</h1>
+    <ol>${navPoints.join('\n')}</ol>
+  </nav>
+</body>
+</html>`;
+  zipFiles.push({ name: 'OEBPS/nav.xhtml', data: enc.encode(navXhtml) });
+  manifestItems.push(`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`);
+
+  const nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  const opf = `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="BookId">${bookId}</dc:identifier>
+    <dc:title>${escapeXml(bookData.title || '未命名電子書')}</dc:title>
+    <dc:creator>${escapeXml(bookData.author || '未知作者')}</dc:creator>
+    <dc:language>zh-HK</dc:language>
+    ${coverMetaTag}
+    <meta property="dcterms:modified">${nowIso}</meta>
+  </metadata>
+  <manifest>
+    ${manifestItems.join('\n    ')}
+  </manifest>
+  <spine>
+    ${spineItems.join('\n    ')}
+  </spine>
+</package>`;
+  zipFiles.push({ name: 'OEBPS/content.opf', data: enc.encode(opf) });
+
+  const zipBytes = buildZip(zipFiles);
+  const blob = new Blob([zipBytes], { type: 'application/epub+zip' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${bookData.title || 'ebook'}.epub`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('EPUB 匯出成功！');
+}
+
+async function parseEpubFile(file) {
+  const buf = await file.arrayBuffer();
+  const fileMap = await readZip(buf);
+  const dec = new TextDecoder('utf-8');
+  const parser = new DOMParser();
+
+  const containerBytes = fileMap.get('META-INF/container.xml');
+  if (!containerBytes) throw new Error('找不到 container.xml');
+  const containerDoc = parser.parseFromString(dec.decode(containerBytes), 'application/xml');
+  const opfPath = containerDoc.querySelector('rootfile').getAttribute('full-path');
+  const baseDir = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
+
+  const opfBytes = fileMap.get(opfPath);
+  const opfDoc = parser.parseFromString(dec.decode(opfBytes), 'application/xml');
+  const title = opfDoc.querySelector('title')?.textContent?.trim() || file.name.replace(/\.epub$/i, '');
+  const author = opfDoc.querySelector('creator')?.textContent?.trim() || '未知作者';
+
+  const manifest = new Map();
+  let coverHref = null;
+  const coverIdFromMeta = opfDoc.querySelector('meta[name="cover"]')?.getAttribute('content');
+
+  opfDoc.querySelectorAll('manifest > item').forEach(item => {
+    const id = item.getAttribute('id');
+    const href = decodeURIComponent(item.getAttribute('href'));
+    const type = item.getAttribute('media-type');
+    const props = item.getAttribute('properties') || '';
+    manifest.set(id, { href, type });
+    if (props.split(/\s+/).includes('cover-image') || (coverIdFromMeta && id === coverIdFromMeta)) {
+      coverHref = href;
+    }
+  });
+
+  let extractedCover = null;
+  if (coverHref) {
+    const covPath = resolvePath(baseDir, coverHref);
+    const covBytes = fileMap.get(covPath);
+    if (covBytes) {
+      const ext = covPath.split('.').pop().toLowerCase();
+      const mime = ext === 'png' ? 'image/png' : (ext === 'gif' ? 'image/gif' : 'image/jpeg');
+      extractedCover = `data:${mime};base64,${uint8ToBase64(covBytes)}`;
+    }
+  }
+
+  const newChapters = [];
+  const spineRefs = opfDoc.querySelectorAll('spine > itemref');
+
+  for (let i = 0; i < spineRefs.length; i++) {
+    const idref = spineRefs[i].getAttribute('idref');
+    const item = manifest.get(idref);
+    if (!item) continue;
+
+    if (item.href.toLowerCase().includes('cover') && !item.href.toLowerCase().includes('chapter')) {
+      const probeDoc = parser.parseFromString(dec.decode(fileMap.get(resolvePath(baseDir, item.href)) || new Uint8Array()), 'text/html');
+      const textLen = (probeDoc.body?.textContent || '').trim().length;
+      if (textLen < 15 && probeDoc.querySelectorAll('img').length === 1) continue;
+    }
+
+    const fullPath = resolvePath(baseDir, item.href);
+    const chapBytes = fileMap.get(fullPath);
+    if (!chapBytes) continue;
+
+    const chapDoc = parser.parseFromString(dec.decode(chapBytes), 'text/html');
+    const chapDir = fullPath.includes('/') ? fullPath.substring(0, fullPath.lastIndexOf('/') + 1) : '';
+
+    chapDoc.querySelectorAll('img').forEach(img => {
+      const src = img.getAttribute('src');
+      if (src && !src.startsWith('data:') && !src.startsWith('http')) {
+        const imgPath = resolvePath(chapDir, decodeURIComponent(src));
+        const imgBytes = fileMap.get(imgPath);
+        if (imgBytes) {
+          const ext = imgPath.split('.').pop().toLowerCase();
+          const mime = ext === 'png' ? 'image/png' : (ext === 'gif' ? 'image/gif' : 'image/jpeg');
+          img.setAttribute('src', `data:${mime};base64,${uint8ToBase64(imgBytes)}`);
+        }
+      }
+    });
+
+    const h1 = chapDoc.querySelector('h1, h2, title');
+    const chapTitle = (h1 && h1.textContent.trim()) ? h1.textContent.trim() : `第 ${i + 1} 章`;
+    if (h1 && (h1.tagName === 'H1' || h1.tagName === 'H2')) h1.remove();
+
+    newChapters.push({
+      id: 'chap-' + i,
+      title: chapTitle,
+      content: chapDoc.body ? chapDoc.body.innerHTML : ''
+    });
+  }
+
+  if (newChapters.length === 0) throw new Error('未能讀取任何章節內容');
+
+  return {
+    id: 'book-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    title,
+    author,
+    cover: extractedCover,
+    chapters: newChapters,
+    updatedAt: Date.now()
+  };
+}
+
+async function handleEpubUpload(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  showToast(`正在匯入 ${files.length} 本 EPUB 書籍...`);
+
+  let lastImported = null;
+  let successCount = 0;
+
+  for (const file of files) {
+    try {
+      const parsedBook = await parseEpubFile(file);
+      await dbSaveBook(parsedBook);
+      lastImported = parsedBook;
+      successCount++;
+    } catch (err) {
+      console.error(file.name, err);
+      showToast(`《${file.name}》匯入失敗：${err.message}`);
+    }
+  }
+
+  if (lastImported) {
+    if (currentMode === 'library') {
+      await renderLibraryView();
+    } else {
+      openBookFromLibrary(lastImported, 'read');
+    }
+    showToast(`成功匯入 ${successCount} 本書籍至書庫`);
+  }
+  event.target.value = '';
+}
+
+/**
+ * 8. 輔助工具
+ */
+function resolvePath(base, rel) {
+  const stack = base.split('/').filter(Boolean);
+  const parts = rel.split('/');
+  for (const p of parts) {
+    if (p === '.' || p === '') continue;
+    if (p === '..') stack.pop();
+    else stack.push(p);
+  }
+  return stack.join('/');
+}
+
+function uint8ToBase64(uint8) {
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < uint8.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, uint8.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, m => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[m]));
+}
+
+function escapeXml(str) {
+  return String(str).replace(/[&<>"']/g, m => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;'
+  }[m]));
+}
+
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+</script>
+</body>
+</html>
