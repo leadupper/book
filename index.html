@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>EPUB Studio — 離線電子書書庫與編輯閱讀器</title>
+<title>EPUB Studio</title>
 <style>
   :root {
     --bg-app: #f4f5f7;
@@ -953,8 +953,8 @@ async function dbGetBook(id) {
   });
 }
 
-async function dbSaveBook(book) {
-  book.updatedAt = Date.now();
+async function dbSaveBook(book, touchUpdatedAt = true) {
+  if (touchUpdatedAt) book.updatedAt = Date.now();
   const db = await openLibraryDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_BOOKS, 'readwrite');
@@ -981,20 +981,19 @@ function createDefaultGuideBook() {
     author: "離線創作工具",
     cover: null,
     updatedAt: Date.now(),
+    readingProgress: { chapterIdx: 0, page: 0 },
     chapters: [
       {
         id: "chap-1",
         title: "第一章：歡迎使用離線本機書庫",
-        content: `<h2>歡迎來到 EPUB Studio</h2>
-        <p>這是一個完全獨立運作、無需任何網路連線的單一檔案電子書書庫、閱讀器與編輯器。</p>
+        content: `<p>這是一個完全獨立運作、無需任何網路連線的單一檔案電子書書庫、閱讀器與編輯器。</p>
         <p>點擊頂部的「<b>📚 書庫</b>」，你可以管理多本電子書、新建空白書籍，或一次過匯入多個本機 <code>.epub</code> 檔案永久保存於瀏覽器內。</p>
         <p>在閱讀模式下，點擊畫面左右兩側、按鍵盤方向鍵，或在手機螢幕上左右滑動即可體驗仿真揭頁效果；底部的閱讀進度條支援拖曳跳頁，亦可隨時一鍵隱藏。</p>`
       },
       {
         id: "chap-2",
         title: "第二章：零外部依賴架構",
-        content: `<h2>斷網依然流暢運作</h2>
-        <p>本工具內建純原生 JavaScript 撰寫的 ZIP 壓縮／解壓縮引擎與 IndexedDB 離線書庫，不依賴任何第三方 CDN，隨時隨地創作與閱讀標準 EPUB 3.0 電子書。</p>`
+        content: `<p>本工具內建純原生 JavaScript 撰寫的 ZIP 壓縮／解壓縮引擎與 IndexedDB 離線書庫，不依賴任何第三方 CDN，隨時隨地創作與閱讀標準 EPUB 3.0 電子書。</p>`
       }
     ]
   };
@@ -1007,11 +1006,21 @@ let bookData = null;
 let currentMode = 'read';
 let currentChapterIdx = 0; // -1 代表封面頁
 let currentPage = 0;
+let pendingRestorePage = null;
 let totalPages = 1;
 let fontSize = 18;
 let pageStepWidth = 0;
 let isPseudoFullscreen = false;
 let isProgressVisible = true;
+
+const saveProgressDebounced = debounce(() => {
+  if (!bookData) return;
+  bookData.readingProgress = {
+    chapterIdx: currentChapterIdx,
+    page: currentPage
+  };
+  dbSaveBook(bookData, false).catch(e => console.error('儲存閱讀進度失敗:', e));
+}, 250);
 
 window.addEventListener('DOMContentLoaded', async () => {
   await openLibraryDB();
@@ -1027,6 +1036,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         author: parsed.author || '離線作者',
         cover: parsed.cover || null,
         chapters: parsed.chapters || createDefaultGuideBook().chapters,
+        readingProgress: { chapterIdx: 0, page: 0 },
         updatedAt: Date.now()
       };
       await dbSaveBook(migrated);
@@ -1191,9 +1201,9 @@ async function switchMode(mode) {
 
   if (isEdit && currentChapterIdx < 0) {
     currentChapterIdx = 0;
-    loadChapter(0);
+    loadChapter(0, 0);
   } else if (!isEdit) {
-    loadChapter(currentChapterIdx);
+    loadChapter(currentChapterIdx, currentPage);
   }
 }
 
@@ -1216,6 +1226,11 @@ async function renderLibraryView() {
       ? new Date(b.updatedAt).toLocaleDateString('zh-HK', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
       : '';
 
+    const prog = b.readingProgress;
+    const progText = prog
+      ? (prog.chapterIdx === -1 ? ' · 封面' : ` · 讀至第 ${prog.chapterIdx + 1} 章 第 ${prog.page + 1} 頁`)
+      : '';
+
     const coverHtml = b.cover
       ? `<img src="${b.cover}" alt="${escapeHtml(b.title)}">`
       : `<div class="card-cover-fallback-title">${escapeHtml(b.title || '未命名電子書')}</div>`;
@@ -1227,7 +1242,7 @@ async function renderLibraryView() {
       </div>
       <div class="card-body">
         <div class="card-title" title="${escapeHtml(b.title)}">${escapeHtml(b.title || '未命名電子書')}</div>
-        <div class="card-meta">${escapeHtml(b.author || '未知作者')} · ${b.chapters?.length || 0} 章</div>
+        <div class="card-meta">${escapeHtml(b.author || '未知作者')} · ${b.chapters?.length || 0} 章${escapeHtml(progText)}</div>
         <div class="card-meta" style="font-size:11px;">更新：${dateStr}</div>
       </div>
       <div class="card-footer">
@@ -1250,10 +1265,30 @@ async function selectBookById(id, targetMode = 'read') {
 function openBookFromLibrary(book, targetMode = 'read') {
   bookData = book;
   localStorage.setItem('epub_studio_active_id', book.id);
-  currentChapterIdx = (targetMode === 'read' && bookData.cover) ? -1 : 0;
+
+  const savedProg = book.readingProgress;
+  const maxChap = Math.max(0, (book.chapters?.length || 1) - 1);
+  const minChap = book.cover ? -1 : 0;
+
+  let startChap = book.cover ? -1 : 0;
+  let startPage = 0;
+
+  if (savedProg && typeof savedProg.chapterIdx === 'number') {
+    startChap = Math.max(minChap, Math.min(maxChap, savedProg.chapterIdx));
+    startPage = Math.max(0, parseInt(savedProg.page, 10) || 0);
+  }
+  if (targetMode === 'edit' && startChap < 0) {
+    startChap = 0;
+    startPage = 0;
+  }
+
+  currentChapterIdx = startChap;
+  currentPage = startPage;
+  pendingRestorePage = startPage;
+
   renderSidebar();
   switchMode(targetMode);
-  loadChapter(currentChapterIdx);
+  loadChapter(currentChapterIdx, startPage);
 }
 
 async function createNewBook() {
@@ -1263,6 +1298,7 @@ async function createNewBook() {
     author: '離線作者',
     cover: null,
     updatedAt: Date.now(),
+    readingProgress: { chapterIdx: 0, page: 0 },
     chapters: [
       {
         id: 'chap-' + Date.now(),
@@ -1303,11 +1339,7 @@ async function deleteBookById(id) {
   }
 
   if (bookData && bookData.id === id) {
-    bookData = remaining[0];
-    localStorage.setItem('epub_studio_active_id', bookData.id);
-    currentChapterIdx = bookData.cover ? -1 : 0;
-    renderSidebar();
-    loadChapter(currentChapterIdx);
+    openBookFromLibrary(remaining[0], 'read');
   }
 
   await renderLibraryView();
@@ -1354,7 +1386,7 @@ function handleCoverUpload(event) {
     renderCoverPreview();
     renderSidebar();
     if (currentMode === 'read') {
-      loadChapter(-1);
+      loadChapter(-1, 0);
     }
     showToast('封面圖片已更新並儲存至書庫');
   };
@@ -1369,9 +1401,9 @@ function removeCover() {
   renderCoverPreview();
   renderSidebar();
   if (currentChapterIdx < 0) {
-    loadChapter(0);
+    loadChapter(0, 0);
   } else if (currentMode === 'read') {
-    loadChapter(currentChapterIdx);
+    loadChapter(currentChapterIdx, currentPage);
   }
   showToast('已移除封面圖片');
 }
@@ -1389,7 +1421,7 @@ function renderSidebar() {
     const coverLi = document.createElement('li');
     coverLi.className = 'chapter-item cover-item' + (currentChapterIdx === -1 ? ' active' : '');
     coverLi.onclick = () => {
-      loadChapter(-1);
+      loadChapter(-1, 0);
       if (window.innerWidth <= 768) toggleSidebar();
     };
     coverLi.innerHTML = `<span class="chapter-title-text">🖼️ 封面頁</span>`;
@@ -1401,7 +1433,7 @@ function renderSidebar() {
     li.className = 'chapter-item' + (idx === currentChapterIdx ? ' active' : '');
     li.onclick = (e) => {
       if (e.target.closest('.chapter-controls')) return;
-      loadChapter(idx);
+      loadChapter(idx, 0);
       if (window.innerWidth <= 768) toggleSidebar();
     };
 
@@ -1417,15 +1449,34 @@ function renderSidebar() {
   });
 }
 
-function loadChapter(idx) {
+function normalizeHeadingText(str) {
+  return String(str || '').replace(/\s+/g, ' ').trim();
+}
+
+function composeReaderChapterHtml(title, content) {
+  const cleanTitle = normalizeHeadingText(title);
+  const rawContent = String(content || '');
+  if (!cleanTitle) return rawContent;
+
+  const probe = document.createElement('div');
+  probe.innerHTML = rawContent;
+  const firstMeaningful = Array.from(probe.children).find(el => normalizeHeadingText(el.textContent).length > 0);
+  if (firstMeaningful && normalizeHeadingText(firstMeaningful.textContent) === cleanTitle) {
+    return rawContent;
+  }
+  return `<h1>${escapeHtml(cleanTitle)}</h1>` + rawContent;
+}
+
+function loadChapter(idx, targetPage = 0) {
   if (!bookData) return;
   if (idx === -1 && !bookData.cover) idx = 0;
   if (idx < -1 || idx >= bookData.chapters.length) return;
   currentChapterIdx = idx;
+  currentPage = Math.max(0, targetPage);
+  pendingRestorePage = currentPage;
   renderSidebar();
 
   const cols = document.getElementById('page-columns');
-  currentPage = 0;
 
   if (idx === -1) {
     cols.innerHTML = `
@@ -1442,7 +1493,7 @@ function loadChapter(idx) {
   document.getElementById('edit-chapter-title').value = chap.title;
   document.getElementById('editor-content').innerHTML = chap.content;
 
-  cols.innerHTML = `<h1>${escapeHtml(chap.title)}</h1>` + chap.content;
+  cols.innerHTML = composeReaderChapterHtml(chap.title, chap.content);
 
   const imgs = cols.querySelectorAll('img');
   if (imgs.length > 0) {
@@ -1460,7 +1511,7 @@ function updateBookMeta() {
   bookData.author = document.getElementById('book-author-input').value;
   persistCurrentBook();
   if (currentChapterIdx === -1 && currentMode === 'read') {
-    loadChapter(-1);
+    loadChapter(-1, 0);
   }
 }
 
@@ -1482,7 +1533,7 @@ function addChapter() {
     content: '<p>在此輸入章節內容...</p>'
   });
   persistCurrentBook();
-  loadChapter(bookData.chapters.length - 1);
+  loadChapter(bookData.chapters.length - 1, 0);
   showToast('已新增章節');
 }
 
@@ -1497,7 +1548,7 @@ function deleteChapter(idx) {
     currentChapterIdx = bookData.chapters.length - 1;
   }
   persistCurrentBook();
-  loadChapter(currentChapterIdx);
+  loadChapter(currentChapterIdx, 0);
   showToast('章節已刪除');
 }
 
@@ -1561,7 +1612,12 @@ function recalculatePagination() {
   const totalScrollWidth = cols.scrollWidth;
   totalPages = Math.max(1, Math.round((totalScrollWidth + gap) / pageStepWidth));
 
-  if (currentPage >= totalPages) currentPage = totalPages - 1;
+  if (pendingRestorePage !== null) {
+    currentPage = Math.max(0, Math.min(totalPages - 1, pendingRestorePage));
+    pendingRestorePage = null;
+  } else if (currentPage >= totalPages) {
+    currentPage = totalPages - 1;
+  }
   applyPageTransform(false);
 }
 
@@ -1578,7 +1634,6 @@ function applyPageTransform(animate, direction = 'next') {
   const offset = currentPage * pageStepWidth;
   cols.style.transform = `translateX(-${offset}px)`;
 
-  // 更新進度條數值與文字
   const pct = totalPages > 1 ? Math.round(((currentPage + 1) / totalPages) * 100) : 100;
   const fill = document.getElementById('progress-fill');
   const slider = document.getElementById('progress-slider');
@@ -1593,6 +1648,8 @@ function applyPageTransform(animate, direction = 'next') {
     : `第 ${currentChapterIdx + 1}/${bookData.chapters.length} 章`;
   document.getElementById('page-indicator').textContent =
     `${secLabel} · ${currentPage + 1}/${totalPages} 頁 (${pct}%)`;
+
+  saveProgressDebounced();
 }
 
 function nextPage() {
@@ -1600,7 +1657,7 @@ function nextPage() {
     currentPage++;
     applyPageTransform(true, 'next');
   } else if (currentChapterIdx < bookData.chapters.length - 1) {
-    loadChapter(currentChapterIdx + 1);
+    loadChapter(currentChapterIdx + 1, 0);
     setTimeout(() => applyPageTransform(true, 'next'), 40);
   } else {
     showToast('已經是最後一頁');
@@ -1613,11 +1670,9 @@ function prevPage() {
     applyPageTransform(true, 'prev');
   } else if (currentChapterIdx > (bookData.cover ? -1 : 0)) {
     const prevIdx = currentChapterIdx - 1;
-    loadChapter(prevIdx);
-    setTimeout(() => {
-      currentPage = totalPages - 1;
-      applyPageTransform(true, 'prev');
-    }, 40);
+    pendingRestorePage = Number.MAX_SAFE_INTEGER;
+    loadChapter(prevIdx, Number.MAX_SAFE_INTEGER);
+    setTimeout(() => applyPageTransform(true, 'prev'), 40);
   } else {
     showToast('已經是第一頁');
   }
@@ -1956,6 +2011,45 @@ async function exportEpub() {
   showToast('EPUB 匯出成功！');
 }
 
+function extractAndDeduplicateChapterTitle(chapDoc, fallbackTitle) {
+  let chapTitle = '';
+  const headingEl = chapDoc.querySelector('body h1, body h2, body h3, body h4');
+
+  if (headingEl && normalizeHeadingText(headingEl.textContent)) {
+    chapTitle = normalizeHeadingText(headingEl.textContent);
+    headingEl.remove();
+  } else {
+    const topBlocks = Array.from(chapDoc.body ? chapDoc.body.children : []);
+    const candidate = topBlocks.find(el => {
+      const txt = normalizeHeadingText(el.textContent);
+      return txt.length > 0 && txt.length <= 45 && !el.querySelector('img');
+    });
+    if (candidate) {
+      chapTitle = normalizeHeadingText(candidate.textContent);
+      candidate.remove();
+    } else {
+      const docTitle = chapDoc.querySelector('title');
+      chapTitle = (docTitle && normalizeHeadingText(docTitle.textContent)) || fallbackTitle;
+    }
+  }
+
+  if (chapDoc.body) {
+    while (chapDoc.body.firstElementChild) {
+      const first = chapDoc.body.firstElementChild;
+      const firstText = normalizeHeadingText(first.textContent);
+      if (!firstText) {
+        first.remove();
+      } else if (firstText === chapTitle && firstText.length <= 60) {
+        first.remove();
+      } else {
+        break;
+      }
+    }
+  }
+
+  return chapTitle;
+}
+
 async function parseEpubFile(file) {
   const buf = await file.arrayBuffer();
   const fileMap = await readZip(buf);
@@ -2033,9 +2127,7 @@ async function parseEpubFile(file) {
       }
     });
 
-    const h1 = chapDoc.querySelector('h1, h2, title');
-    const chapTitle = (h1 && h1.textContent.trim()) ? h1.textContent.trim() : `第 ${i + 1} 章`;
-    if (h1 && (h1.tagName === 'H1' || h1.tagName === 'H2')) h1.remove();
+    const chapTitle = extractAndDeduplicateChapterTitle(chapDoc, `第 ${i + 1} 章`);
 
     newChapters.push({
       id: 'chap-' + i,
@@ -2052,6 +2144,7 @@ async function parseEpubFile(file) {
     author,
     cover: extractedCover,
     chapters: newChapters,
+    readingProgress: { chapterIdx: extractedCover ? -1 : 0, page: 0 },
     updatedAt: Date.now()
   };
 }
