@@ -1263,6 +1263,21 @@ async function selectBookById(id, targetMode = 'read') {
 }
 
 function openBookFromLibrary(book, targetMode = 'read') {
+  // 確保舊書庫入面已經存在嘅重覆標題都會即時清理
+  if (Array.isArray(book.chapters)) {
+    let changed = false;
+    book.chapters.forEach(ch => {
+      const cleaned = stripDuplicateLeadingHeading(ch.title, ch.content);
+      if (cleaned !== ch.content) {
+        ch.content = cleaned;
+        changed = true;
+      }
+    });
+    if (changed) {
+      dbSaveBook(book, false).catch(() => {});
+    }
+  }
+
   bookData = book;
   localStorage.setItem('epub_studio_active_id', book.id);
 
@@ -1450,21 +1465,83 @@ function renderSidebar() {
 }
 
 function normalizeHeadingText(str) {
-  return String(str || '').replace(/\s+/g, ' ').trim();
+  return String(str || '').replace(/[\s\u3000\u00A0]+/g, ' ').trim();
+}
+
+function headingFingerprint(str) {
+  return normalizeHeadingText(str)
+    .replace(/[\s\u3000\u00A0·•・：:．.、,，\-—–_()（）【】\[\]「」『』]/g, '')
+    .toLowerCase();
+}
+
+/**
+ * 遞迴剝除正文最開頭任何與章節標題相同嘅重複標題節點
+ */
+function stripDuplicateLeadingHeading(title, html) {
+  const targetFp = headingFingerprint(title);
+  const raw = String(html || '');
+  if (!targetFp || !raw.trim()) return raw;
+
+  const root = document.createElement('div');
+  root.innerHTML = raw;
+
+  function pruneFirstMatch(container) {
+    while (container.firstChild) {
+      const node = container.firstChild;
+      if (node.nodeType === Node.TEXT_NODE) {
+        const txt = node.textContent;
+        if (!txt.trim()) {
+          node.remove();
+          continue;
+        }
+        if (headingFingerprint(txt) === targetFp) {
+          node.remove();
+          return true;
+        }
+        return false;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        node.remove();
+        continue;
+      }
+      if (node.tagName === 'BR') {
+        node.remove();
+        continue;
+      }
+      const elText = normalizeHeadingText(node.textContent);
+      if (!elText && !node.querySelector('img, svg, video, table')) {
+        node.remove();
+        continue;
+      }
+      if (headingFingerprint(elText) === targetFp && elText.length <= 80) {
+        node.remove();
+        return true;
+      }
+      // 如果係外層容器（例如 <div class="chapter">），深入檢查入面第一個子節點
+      if (node.children.length > 0 && !/^H[1-6]$/.test(node.tagName)) {
+        const removed = pruneFirstMatch(node);
+        if (removed) {
+          if (!normalizeHeadingText(node.textContent) && !node.querySelector('img, svg, video, table')) {
+            node.remove();
+          }
+          return true;
+        }
+      }
+      return false;
+    }
+    return false;
+  }
+
+  let guard = 0;
+  while (guard++ < 5 && pruneFirstMatch(root)) {}
+  return root.innerHTML;
 }
 
 function composeReaderChapterHtml(title, content) {
   const cleanTitle = normalizeHeadingText(title);
-  const rawContent = String(content || '');
-  if (!cleanTitle) return rawContent;
-
-  const probe = document.createElement('div');
-  probe.innerHTML = rawContent;
-  const firstMeaningful = Array.from(probe.children).find(el => normalizeHeadingText(el.textContent).length > 0);
-  if (firstMeaningful && normalizeHeadingText(firstMeaningful.textContent) === cleanTitle) {
-    return rawContent;
-  }
-  return `<h1>${escapeHtml(cleanTitle)}</h1>` + rawContent;
+  const dedupedContent = stripDuplicateLeadingHeading(cleanTitle, content);
+  if (!cleanTitle) return dedupedContent;
+  return `<h1>${escapeHtml(cleanTitle)}</h1>` + dedupedContent;
 }
 
 function loadChapter(idx, targetPage = 0) {
@@ -1490,6 +1567,7 @@ function loadChapter(idx, targetPage = 0) {
   }
 
   const chap = bookData.chapters[idx];
+  chap.content = stripDuplicateLeadingHeading(chap.title, chap.content);
   document.getElementById('edit-chapter-title').value = chap.title;
   document.getElementById('editor-content').innerHTML = chap.content;
 
@@ -1520,7 +1598,7 @@ function saveCurrentChapter() {
   const chap = bookData.chapters[currentChapterIdx];
   if (!chap) return;
   chap.title = document.getElementById('edit-chapter-title').value;
-  chap.content = document.getElementById('editor-content').innerHTML;
+  chap.content = stripDuplicateLeadingHeading(chap.title, document.getElementById('editor-content').innerHTML);
   renderSidebar();
   persistCurrentBook();
 }
@@ -1918,9 +1996,10 @@ async function exportEpub() {
   bookData.chapters.forEach((chap, index) => {
     const chapFileName = `chapter_${index + 1}.xhtml`;
     const chapId = `chap_${index + 1}`;
+    const cleanBodyHtml = stripDuplicateLeadingHeading(chap.title, chap.content);
 
     const parser = new DOMParser();
-    const doc = parser.parseFromString(`<div>${chap.content}</div>`, 'text/html');
+    const doc = parser.parseFromString(`<div>${cleanBodyHtml}</div>`, 'text/html');
     const imgs = doc.querySelectorAll('img');
 
     imgs.forEach(img => {
@@ -2013,16 +2092,17 @@ async function exportEpub() {
 
 function extractAndDeduplicateChapterTitle(chapDoc, fallbackTitle) {
   let chapTitle = '';
-  const headingEl = chapDoc.querySelector('body h1, body h2, body h3, body h4');
+  const headingEl = chapDoc.querySelector('body h1, body h2, body h3, body h4, body h5, body h6');
 
   if (headingEl && normalizeHeadingText(headingEl.textContent)) {
     chapTitle = normalizeHeadingText(headingEl.textContent);
     headingEl.remove();
   } else {
-    const topBlocks = Array.from(chapDoc.body ? chapDoc.body.children : []);
-    const candidate = topBlocks.find(el => {
+    const candidates = Array.from(chapDoc.body ? chapDoc.body.querySelectorAll('p, div, span, strong, b') : []);
+    const candidate = candidates.find(el => {
+      if (el.children.length > 0 && el.querySelector('p, div, img')) return false;
       const txt = normalizeHeadingText(el.textContent);
-      return txt.length > 0 && txt.length <= 45 && !el.querySelector('img');
+      return txt.length > 0 && txt.length <= 45;
     });
     if (candidate) {
       chapTitle = normalizeHeadingText(candidate.textContent);
@@ -2033,21 +2113,9 @@ function extractAndDeduplicateChapterTitle(chapDoc, fallbackTitle) {
     }
   }
 
-  if (chapDoc.body) {
-    while (chapDoc.body.firstElementChild) {
-      const first = chapDoc.body.firstElementChild;
-      const firstText = normalizeHeadingText(first.textContent);
-      if (!firstText) {
-        first.remove();
-      } else if (firstText === chapTitle && firstText.length <= 60) {
-        first.remove();
-      } else {
-        break;
-      }
-    }
-  }
-
-  return chapTitle;
+  const rawBody = chapDoc.body ? chapDoc.body.innerHTML : '';
+  const cleanedBody = stripDuplicateLeadingHeading(chapTitle, rawBody);
+  return { chapTitle, cleanedBody };
 }
 
 async function parseEpubFile(file) {
@@ -2127,12 +2195,12 @@ async function parseEpubFile(file) {
       }
     });
 
-    const chapTitle = extractAndDeduplicateChapterTitle(chapDoc, `第 ${i + 1} 章`);
+    const { chapTitle, cleanedBody } = extractAndDeduplicateChapterTitle(chapDoc, `第 ${i + 1} 章`);
 
     newChapters.push({
       id: 'chap-' + i,
       title: chapTitle,
-      content: chapDoc.body ? chapDoc.body.innerHTML : ''
+      content: cleanedBody
     });
   }
 
